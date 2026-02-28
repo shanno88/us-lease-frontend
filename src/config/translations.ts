@@ -36,7 +36,7 @@ export const zh: Dict = {
   feature4_body: '重点分析滞纳金、押金、提前解约、涨租续约等条款，生成中文风险报告',
 
   steps_title: '怎么用？',
-  step1: '第一步：上传合同 — 支持 PDF 或图片，手机拍照即可',
+  step1: '第一步：上传合同 — 支持 JPG/PNG 图片，最多10张，手机拍照即可',
   step2: '第二步：等待分析 — AI 自动识别关键条款，标记风险等级',
   step3: '第三步：查看报告 — 几分钟内生成中文总结，重点条款有解释',
 };
@@ -57,7 +57,7 @@ export const en: Dict = {
   feature4_body: 'Choose a single review or a plan that covers multiple leases and renewals throughout the academic year.',
 
   steps_title: '3 steps to check your lease',
-  step1: '1. Upload your lease as PDF or images',
+  step1: 'Step 1: Upload Lease — JPG/PNG images supported, up to 10 pages, phone photos welcome',
   step2: '2. Wait ~3 minutes for your bilingual report',
   step3: '3. Use the recommendations to negotiate or decide whether to sign',
 };
