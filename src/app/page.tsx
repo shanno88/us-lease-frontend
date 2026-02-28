@@ -41,6 +41,7 @@ export default function Home() {
 
   const [files, setFiles] = useState<File[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -136,76 +137,78 @@ export default function Home() {
     }
     setIsAnalyzing(true);
     setIsSampleReport(false);
+    setCurrentPage(0);
 
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const riskLevelToScore: Record<string, number> = {
+      'low': 25, 'safe': 25,
+      'medium': 50, 'caution': 50,
+      'high': 75, 'danger': 75
+    };
+
     try {
-      const formData = new FormData();
-      files.forEach((f) => formData.append('files', f));
+      const allClauses: Array<Record<string, unknown>> = [];
+      let combinedSummary = '';
+      let totalRiskScore = 0;
 
-      const url = `${API_BASE_URL}/api/lease/analyze?user_id=${userId}`;
+      for (let i = 0; i < files.length; i++) {
+        setCurrentPage(i + 1);
+        showToast(lang === 'zh' ? `正在分析第 ${i + 1}/${files.length} 张...` : `Analyzing page ${i + 1} of ${files.length}...`, 'info');
 
-      const controller = new AbortController();
-      timeout = setTimeout(() => controller.abort(), 300000); // 5 minutes
+        const formData = new FormData();
+        formData.append('files', files[i]);
 
-      const response = await fetch(url, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+        const url = `${API_BASE_URL}/api/lease/analyze?user_id=${userId}`;
+        const response = await fetch(url, { method: 'POST', body: formData });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({} as Record<string, unknown>));
-        const message = String(errorData?.message || errorData?.detail || `API error: ${response.status}`);
-        showToast(message, 'error');
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({} as Record<string, unknown>));
+          showToast(String(errorData?.detail || errorData?.message || `Page ${i + 1} failed`), 'error');
+          continue;
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+          showToast(data.error || `Page ${i + 1} failed`, 'error');
+          continue;
+        }
+
+        const apiData = data.data || data;
+        const clauses = apiData.clauses || [];
+        allClauses.push(...clauses);
+        if (apiData.summary) {
+          const s = apiData.summary;
+          combinedSummary = typeof s === 'string' ? s : (s.late_fee_summary_zh || s.early_termination_risk_zh || '');
+        }
+        if (apiData.risk_score != null) totalRiskScore = Number(apiData.risk_score);
+      }
+
+      if (allClauses.length === 0) {
+        showToast(lang === 'zh' ? '未能从任何页面提取条款' : 'No clauses extracted from any page', 'error');
         return;
       }
 
-      const data = await response.json();
-
-      if (!data.success) {
-        showToast(data.error || 'Analysis failed', 'error');
-        return;
-      }
-
-      const apiData = data.data || data;
-      const summary = apiData.summary || {};
-      const clauses = apiData.clauses || [];
-
-      // Handle summary being either a string or an object
-      const summaryText = typeof summary === 'string' 
-        ? summary 
-        : (summary.late_fee_summary_zh || summary.early_termination_risk_zh || '');
-
-      const riskLevelToScore: Record<string, number> = {
-        'low': 25, 'safe': 25,
-        'medium': 50, 'caution': 50,
-        'high': 75, 'danger': 75
-      };
-
-      const avgRisk = clauses.length > 0
-        ? clauses.reduce((acc: number, c: Record<string, unknown>) => {
+      const avgRisk = totalRiskScore > 0
+        ? totalRiskScore
+        : allClauses.reduce((acc: number, c: Record<string, unknown>) => {
             const level = String(c.risk_level || 'medium').toLowerCase();
             return acc + (riskLevelToScore[level] || 50);
-          }, 0) / clauses.length
-        : 50;
+          }, 0) / allClauses.length;
 
       const result: AnalysisResult = {
-        summary: summaryText || (lang === 'zh' ? '合同分析已完成' : 'Lease analysis completed'),
+        summary: combinedSummary || (lang === 'zh' ? '合同分析已完成' : 'Lease analysis completed'),
         riskScore: Math.round(avgRisk),
-        clauses: clauses.slice(0, 10).map((clause: Record<string, unknown>) => {
+        clauses: allClauses.slice(0, 20).map((clause: Record<string, unknown>, idx: number) => {
           const riskLevel = String(clause.risk_level || 'medium').toLowerCase();
-          const mappedRisk: 'high' | 'medium' | 'low' = 
+          const mappedRisk: 'high' | 'medium' | 'low' =
             riskLevel === 'high' ? 'high' :
             riskLevel === 'medium' ? 'medium' : 'low';
-          
           return {
-            id: String(clause.id || clause.clause_id || ''),
+            id: `${idx}-${clause.id || clause.clause_id || ''}`,
             title: String(clause.title_en || clause.id || clause.clause_id || ''),
             risk: mappedRisk,
             summary: String(clause.summary_zh || ''),
-            original: clause.original_text ? String(clause.original_text) : 
-                      clause.clause_text_en ? String(clause.clause_text_en) : undefined,
+            original: clause.original_text ? String(clause.original_text) :
+              clause.clause_text_en ? String(clause.clause_text_en) : undefined,
           };
         }),
       };
@@ -218,14 +221,14 @@ export default function Home() {
     } catch (error) {
       console.error('Analysis error:', error);
       showToast(
-        lang === 'zh' 
-          ? `分析失败: ${error instanceof Error ? error.message : '请检查网络连接后重试'}` 
+        lang === 'zh'
+          ? `分析失败: ${error instanceof Error ? error.message : '请检查网络连接后重试'}`
           : `Analysis failed: ${error instanceof Error ? error.message : 'Please check your connection and try again.'}`,
         'error'
       );
     } finally {
-      if (timeout) clearTimeout(timeout);
       setIsAnalyzing(false);
+      setCurrentPage(0);
     }
   };
   const handlePrint = () => {
@@ -462,19 +465,23 @@ export default function Home() {
               {isAnalyzing && (
                 <>
                   <p className="text-center text-gray-500 mt-4 animate-pulse">
-                    {lang === 'zh' ? '正在分析租约，通常需要 30–90 秒，请耐心等待...' : 'Analyzing lease, usually takes 30–90 seconds, please wait patiently...'}
+                    {currentPage > 0
+                      ? (lang === 'zh' ? `正在分析第 ${currentPage}/${files.length} 张...` : `Analyzing page ${currentPage} of ${files.length}...`)
+                      : (lang === 'zh' ? '正在分析租约，请耐心等待...' : 'Analyzing lease, please wait...')}
                   </p>
                   <div className="mt-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
                     <div className="flex items-start gap-3">
                       <Loader2 className="h-5 w-5 text-indigo-600 animate-spin flex-shrink-0 mt-0.5" />
                       <div>
                         <p className="text-indigo-900 font-medium">
-                          {lang === 'zh' ? '正在分析您的合同...' : 'Analyzing your lease...'}
+                          {currentPage > 0
+                            ? (lang === 'zh' ? `正在分析第 ${currentPage} 张，共 ${files.length} 张` : `Analyzing page ${currentPage} of ${files.length}`)
+                            : (lang === 'zh' ? '正在分析您的合同...' : 'Analyzing your lease...')}
                         </p>
                         <p className="text-indigo-700 text-sm mt-1">
-                          {lang === 'zh' 
-                            ? '这通常需要 1–2 分钟，请不要关闭或刷新页面。' 
-                            : 'This usually takes 1–2 minutes. Please don\'t close or refresh the page.'}
+                          {lang === 'zh'
+                            ? '请不要关闭或刷新页面。'
+                            : 'Please don\'t close or refresh the page.'}
                         </p>
                       </div>
                     </div>
