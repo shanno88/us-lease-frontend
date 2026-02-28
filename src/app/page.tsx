@@ -1,6 +1,6 @@
 // src/app/page.tsx
 "use client";
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   Upload,
   FileText,
@@ -39,12 +39,14 @@ export default function Home() {
   const t = lang === 'zh' ? zh : en;
   const { isLoading: isCheckingAccess, hasAccess, userId } = useAccessControl();
 
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'info' });
   const [isSampleReport, setIsSampleReport] = useState(false);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const showToast = useCallback((message: string, type: ToastState['type'] = 'info') => {
     setToast({ show: true, message, type });
@@ -102,21 +104,30 @@ export default function Home() {
     showToast(lang === 'zh' ? '已加载示例报告' : 'Sample report loaded', 'info');
   }, [getSampleResult, showToast, lang]);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      if (selectedFile.size > 10 * 1024 * 1024) {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length > 3) {
+      showToast(lang === 'zh' ? '最多上传3张图片' : 'Maximum 3 images allowed', 'error');
+      return;
+    }
+    for (const f of selected) {
+      if (f.size > 10 * 1024 * 1024) {
         showToast(lang === 'zh' ? '文件太大，请上传小于10MB的文件' : 'File too large. Please upload a file under 10MB.', 'error');
         return;
       }
-      setFile(selectedFile);
+    }
+    if (selected.length > 0) {
+      setFiles(selected.slice(0, 3));
       setAnalysisResult(null);
       setIsSampleReport(false);
-      showToast(lang === 'zh' ? '文件已选择' : 'File selected', 'success');
+      showToast(lang === 'zh' ? `已选择 ${selected.length} 张图片` : `${selected.length} image(s) selected`, 'success');
     }
   };
   const handleAnalyze = async () => {
-    if (!file) {
-      showToast(lang === 'zh' ? '请先上传合同文件' : 'Please upload a lease file first', 'error');
+    setAnalysisResult(null);
+    setError(null);
+
+    if (!files?.length) {
+      showToast(lang === 'zh' ? '请先上传租约照片' : 'Please upload lease page photos first', 'error');
       return;
     }
     if (!userId) {
@@ -126,16 +137,22 @@ export default function Home() {
     setIsAnalyzing(true);
     setIsSampleReport(false);
 
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const formData = new FormData();
-      formData.append('files', file);
+      files.forEach((f) => formData.append('files', f));
 
       const url = `${API_BASE_URL}/api/lease/analyze?user_id=${userId}`;
+
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
       const response = await fetch(url, {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({} as Record<string, unknown>));
@@ -194,6 +211,9 @@ export default function Home() {
       };
 
       setAnalysisResult(result);
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
       showToast(lang === 'zh' ? '分析完成' : 'Analysis complete', 'success');
     } catch (error) {
       console.error('Analysis error:', error);
@@ -204,6 +224,7 @@ export default function Home() {
         'error'
       );
     } finally {
+      if (timeout) clearTimeout(timeout);
       setIsAnalyzing(false);
     }
   };
@@ -387,22 +408,23 @@ export default function Home() {
 
             <div className="bg-white rounded-2xl p-8 shadow-lg border border-slate-100">
               <div
-                className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${file ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-indigo-300'
+                className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${files.length ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-indigo-300'
                   }`}
               >
                 <input
                   type="file"
                   id="file-upload"
                   className="hidden"
-                  accept=".pdf,.png,.jpg,.jpeg"
+                  accept="image/*"
+                  multiple
                   onChange={handleFileChange}
                 />
                 <label htmlFor="file-upload" className="cursor-pointer">
-                  <Upload className={`h-12 w-12 mx-auto mb-4 ${file ? 'text-emerald-500' : 'text-slate-400'}`} />
-                  {file ? (
+                  <Upload className={`h-12 w-12 mx-auto mb-4 ${files.length ? 'text-emerald-500' : 'text-slate-400'}`} />
+                  {files.length ? (
                     <div className="text-emerald-700">
                       <CheckCircle className="h-5 w-5 inline-block mr-2" />
-                      {file.name}
+                      {files.length === 1 ? files[0].name : (lang === 'zh' ? `${files.length} 张图片已选择` : `${files.length} files selected`)}
                     </div>
                   ) : (
                     <div>
@@ -410,7 +432,7 @@ export default function Home() {
                         {lang === 'zh' ? '点击上传或拖拽文件到此处' : 'Click to upload or drag and drop'}
                       </p>
                       <p className="text-sm text-slate-400">
-                        {lang === 'zh' ? '支持 PDF, PNG, JPG (最大 10MB)' : 'PDF, PNG, JPG up to 10MB'}
+                        {lang === 'zh' ? '最多上传3张租约页照片 (JPG/PNG)' : 'Upload up to 3 lease page photos (JPG/PNG)'}
                       </p>
                     </div>
                   )}
@@ -418,8 +440,8 @@ export default function Home() {
               </div>
               <button
                 onClick={handleAnalyze}
-                disabled={!file || isAnalyzing}
-                className={`w-full mt-6 py-4 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 ${!file || isAnalyzing
+                disabled={!files?.length || isAnalyzing}
+                className={`w-full mt-6 py-4 rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 ${!files?.length || isAnalyzing
                     ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                     : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200'
                   }`}
@@ -438,24 +460,30 @@ export default function Home() {
               </button>
               
               {isAnalyzing && (
-                <div className="mt-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-                  <div className="flex items-start gap-3">
-                    <Loader2 className="h-5 w-5 text-indigo-600 animate-spin flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-indigo-900 font-medium">
-                        {lang === 'zh' ? '正在分析您的合同...' : 'Analyzing your lease...'}
-                      </p>
-                      <p className="text-indigo-700 text-sm mt-1">
-                        {lang === 'zh' 
-                          ? '这通常需要 1–2 分钟，请不要关闭或刷新页面。' 
-                          : 'This usually takes 1–2 minutes. Please don\'t close or refresh the page.'}
-                      </p>
+                <>
+                  <p className="text-center text-gray-500 mt-4 animate-pulse">
+                    {lang === 'zh' ? '正在分析租约，通常需要 30–90 秒，请耐心等待...' : 'Analyzing lease, usually takes 30–90 seconds, please wait patiently...'}
+                  </p>
+                  <div className="mt-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                    <div className="flex items-start gap-3">
+                      <Loader2 className="h-5 w-5 text-indigo-600 animate-spin flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-indigo-900 font-medium">
+                          {lang === 'zh' ? '正在分析您的合同...' : 'Analyzing your lease...'}
+                        </p>
+                        <p className="text-indigo-700 text-sm mt-1">
+                          {lang === 'zh' 
+                            ? '这通常需要 1–2 分钟，请不要关闭或刷新页面。' 
+                            : 'This usually takes 1–2 minutes. Please don\'t close or refresh the page.'}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
-            {analysisResult && (
+            <div ref={resultsRef}>
+              {analysisResult && (
               <div className="mt-8 bg-white rounded-2xl p-8 shadow-lg border border-slate-100">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
@@ -540,7 +568,8 @@ export default function Home() {
                   ))}
                 </div>
               </div>
-            )}
+              )}
+            </div>
           </div>
         </section>
         
