@@ -105,8 +105,8 @@ export default function Home() {
   }, [getSampleResult, showToast, lang]);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
-    if (selected.length > 3) {
-      showToast(lang === 'zh' ? '最多上传3张图片' : 'Maximum 3 images allowed', 'error');
+    if (selected.length > 10) {
+      showToast(lang === 'zh' ? '最多上传10张图片' : 'Maximum 10 images allowed', 'error');
       return;
     }
     for (const f of selected) {
@@ -116,7 +116,7 @@ export default function Home() {
       }
     }
     if (selected.length > 0) {
-      setFiles(selected.slice(0, 3));
+      setFiles(selected.slice(0, 10));
       setAnalysisResult(null);
       setIsSampleReport(false);
       showToast(lang === 'zh' ? `已选择 ${selected.length} 张图片` : `${selected.length} image(s) selected`, 'success');
@@ -432,7 +432,7 @@ export default function Home() {
                         {lang === 'zh' ? '点击上传或拖拽文件到此处' : 'Click to upload or drag and drop'}
                       </p>
                       <p className="text-sm text-slate-400">
-                        {lang === 'zh' ? '最多上传3张租约页照片 (JPG/PNG)' : 'Upload up to 3 lease page photos (JPG/PNG)'}
+                        {lang === 'zh' ? '最多上传10张租约页照片 (JPG/PNG)' : 'Upload up to 10 lease page photos (JPG/PNG)'}
                       </p>
                     </div>
                   )}
